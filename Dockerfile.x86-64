@@ -29,9 +29,7 @@ RUN strip /repo/target/release/hass-event-collector
 
 FROM gcr.io/distroless/cc-debian12
 COPY --from=builder /repo/target/release/hass-event-collector /usr/local/bin/hass-event-collector
-EXPOSE 80
 ENV \
-	PORT=80 \
 	RUST_LOG=debug,hyper=info \
 	HASS_HOST= \
 	HASS_PORT=8123 \
