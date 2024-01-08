@@ -17,8 +17,6 @@ variables:
   SCCACHE_ENDPOINT: rgw.storage.home.quadra-tec.net:7480
   SCCACHE_S3_USE_SSL: "off"
   SCCACHE_BUCKET: gitlab-sccache
-  SCCACHE_LOG: debug
-  SCCACHE_NO_DAEMON: "1"
 
 cargo build and cargo test:
   stage: build
