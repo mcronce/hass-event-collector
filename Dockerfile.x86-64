@@ -32,7 +32,7 @@ COPY --from=builder /repo/target/release/hass-event-collector /usr/local/bin/has
 EXPOSE 80
 ENV \
 	PORT=80 \
-	RUST_LOG=info,actix-web=debug \
+	RUST_LOG=debug,hyper=info \
 	HASS_HOST= \
 	HASS_PORT=80 \
 	HASS_TOKEN= \
