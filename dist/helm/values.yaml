@@ -1,0 +1,48 @@
+image:
+  registry: mcronce
+  name: hass-event-collector
+  tag: v0.1.0
+  pullPolicy: IfNotPresent
+  pullSecret:
+
+replicas: 2
+
+collector:
+  log_level: info
+  hass:
+    secret:
+      deploy: true
+      name_override:
+      token:
+    host:
+    port: 8123
+    entity_filter:
+      kind: sensor
+      name: "^lumi_"
+  mqtt:
+    host:
+    port: 1883
+    topic:
+  influxdb:
+    secret:
+      enabled: true
+      deploy: true
+      name_override:
+      username:
+      password:
+    host:
+    port: 8086
+    tls: false
+    database: example
+
+extraLabels: {}
+extraEnv: []
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 16Mi
+  limits:
+    cpu: 2
+    memory: 64Mi
+

@@ -1,0 +1,81 @@
+{{- $workers := 1 }}
+{{- if .Values.resources.limits.cpu }}
+  {{- if typeIs "string" .Values.resources.limits.cpu }}
+    {{- $trimmed := trimSuffix "m" .Values.resources.limits.cpu }}
+    {{- $value := ternary (float64 $trimmed | ceil | mul 1000) $trimmed (contains "." $trimmed) | int64 }}
+    {{- if eq (mod $value 1000) 0 }}
+      {{- $workers = div $value 1000 }}
+    {{- else }}
+      {{- $workers = add1 (div $value 1000) }}
+    {{- end }}
+  {{- else }}
+    {{- $workers = .Values.resources.limits.cpu }}
+  {{- end }}
+{{- end }}
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name:  {{ template "collector.fullname" . }}
+  labels:
+    {{- include "collector.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicas }}
+  selector:
+    matchLabels:
+      {{- include "collector.labels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "collector.labels" . | nindent 8 }}
+    spec:
+      containers:
+        - name: collector
+          image: "{{ .Values.image.registry }}/{{ .Values.image.name }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+            - name: RUST_LOG
+              value: {{ .Values.collector.log_level | quote }}
+            - name: TOKIO_WORKER_THREADS
+              value: {{ $workers | quote }}
+            - name: HASS_HOST
+              value: {{ required "collector.hass.host is required" .Values.collector.hass.host | quote }}
+            - name: HASS_PORT
+              value: {{ .Values.collector.hass.port | quote }}
+            - name: MQTT_HOST
+              value: {{ required "collector.mqtt.host is required" .Values.collector.mqtt.host | quote }}
+            - name: MQTT_PORT
+              value: {{ .Values.collector.mqtt.port | quote }}
+            - name: MQTT_TOPIC
+              value: {{ required "collector.mqtt.topic is required" .Values.collector.mqtt.topic | quote }}
+            - name: ENTITY_FILTER
+              value: {{ required ".Values.collector.hass.entity_filter is required" .Values.collector.hass.entity_filter | toJson | quote }}
+            - name: WORKERS
+              value: {{ $workers | quote }}
+            - name: INFLUXDB_HOST
+              value: {{ required "collector.influxdb.host is required" .Values.collector.influxdb.host | quote }}
+            - name: INFLUXDB_PORT
+              value: {{ .Values.collector.influxdb.port | quote }}
+            - name: INFLUXDB_USE_TLS
+              value: {{ .Values.collector.influxdb.tls | quote }}
+            - name: INFLUXDB_DATABASE
+              value: {{ required "collector.influxdb.database is required" .Values.collector.influxdb.database | quote }}
+            {{- range .Values.extraEnv }}
+            - name: {{ .name }}
+              value: {{ .value | quote }}
+            {{- end }}
+          envFrom:
+            - secretRef:
+                name: {{ include "collector.hass_secret_name" . }}
+            {{- if .Values.collector.influxdb.secret.enabled }}
+            - secretRef:
+                name: {{ include "collector.influxdb_secret_name" . }}
+            {{- end }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      nodeSelector:
+        {{- toYaml .Values.nodeSelector | nindent 8 }}
+      affinity:
+        {{- toYaml .Values.affinity | nindent 8 }}
+      tolerations:
+        {{- toYaml .Values.tolerations | nindent 8 }}
