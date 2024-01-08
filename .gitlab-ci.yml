@@ -52,7 +52,7 @@ Build x86-64 container image:
     - bash -ec 'find Cargo.toml src -type f | while read file; do revision="$(git rev-list -n 1 HEAD "${file}")"; timestamp="$(git show --pretty=format:%ai --abbrev-commit "${revision}" | head -n1)"; touch -d "${timestamp}" "${file}"; done'
   script:
     - |
-      BUILD_ARGS="--build-arg=CARGO_INCREMENTAL --build-arg=RUSTC_WRAPPER --build-arg=SCCACHE_ENDPOINT --build-arg=SCCACHE_BUCKET --build-arg=AWS_ACCESS_KEY_ID --build-arg=AWS_SECRET_ACCESS_KEY"
+      BUILD_ARGS="--build-arg=CARGO_INCREMENTAL --build-arg=RUSTC_WRAPPER --build-arg=SCCACHE_REGION --build-arg=SCCACHE_ENDPOINT --build-arg=SCCACHE_BUCKET --build-arg=AWS_ACCESS_KEY_ID --build-arg=AWS_SECRET_ACCESS_KEY"
       docker build $BUILD_ARGS -f Dockerfile.x86-64 --cache-from "mcronce/hass-event-collector-builder" --target=builder -t "mcronce/hass-event-collector-builder" .
       docker build $BUILD_ARGS -f Dockerfile.x86-64 --cache-from "mcronce/hass-event-collector-builder" --cache-from "mcronce/hass-event-collector" -t "mcronce/hass-event-collector:amd64" .
     - mkdir -pv images
