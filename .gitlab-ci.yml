@@ -1,0 +1,124 @@
+stages:
+  - build
+  - deploy
+  - cleanup
+
+services:
+  - name: docker:dind
+    command: ["--tls=false"]
+
+variables:
+  CARGO_INCREMENTAL: "0"
+  DOCKER_DRIVER: overlay2
+  DOCKER_HOST: tcp://localhost:2375
+  DOCKER_TLS_CERTDIR: ""
+  RUSTC_WRAPPER: /usr/bin/sccache
+  SCCACHE_ENDPOINT: rgw.storage.home.quadra-tec.net:7480
+  SCCACHE_S3_USE_SSL: "off"
+  SCCACHE_BUCKET: gitlab-sccache
+
+cargo build and cargo test:
+  stage: build
+  image: mcronce/rust-pgo:1.75
+  cache:
+    - key: rust
+      paths:
+        - .cargo
+  before_script:
+    - |
+      if [ -d .cargo ]; then
+        rm -Rf /usr/local/cargo/registry
+        time mv -f .cargo/registry /usr/local/cargo/
+      fi
+  script:
+    - cargo build
+    - cargo clippy --no-deps -- -D warnings
+    - cargo test
+  after_script:
+    - if [ ! -d .cargo ]; then mkdir .cargo; fi
+    - time mv -f /usr/local/cargo/registry .cargo/
+    - /usr/bin/sccache -s
+
+Build x86-64 container image:
+  stage: build
+  image: docker:20-git
+  artifacts:
+    paths:
+      - images/release.amd64.tar.gz
+  before_script:
+    - docker version
+    - apk add -U bash coreutils
+    - bash -ec 'find Cargo.toml src -type f | while read file; do revision="$(git rev-list -n 1 HEAD "${file}")"; timestamp="$(git show --pretty=format:%ai --abbrev-commit "${revision}" | head -n1)"; touch -d "${timestamp}" "${file}"; done'
+  script:
+    - |
+      BUILD_ARGS="--build-arg=CARGO_INCREMENTAL --build-arg=RUSTC_WRAPPER --build-arg=SCCACHE_ENDPOINT --build-arg=SCCACHE_BUCKET --build-arg=AWS_ACCESS_KEY_ID --build-arg=AWS_SECRET_ACCESS_KEY"
+      docker build $BUILD_ARGS -f Dockerfile.x86-64 --cache-from "mcronce/hass-event-collector-builder" --target=builder -t "mcronce/hass-event-collector-builder" .
+      docker build $BUILD_ARGS -f Dockerfile.x86-64 --cache-from "mcronce/hass-event-collector-builder" --cache-from "mcronce/hass-event-collector" -t "mcronce/hass-event-collector:amd64" .
+    - mkdir -pv images
+    - time docker save "mcronce/hass-event-collector:amd64" | gzip > images/release.amd64.tar.gz
+  after_script:
+    - docker rmi -f "mcronce/hass-event-collector-builder"
+    - docker rmi -f "mcronce/hass-event-collector:amd64"
+  only:
+    - tags
+
+Lint chart:
+  stage: build
+  image: alpine/helm:latest
+  script:
+    - helm lint ./dist/helm
+
+Push container image:
+  stage: deploy
+  image: docker:20-git
+  before_script:
+    - docker version
+    - echo "${DOCKER_PASSWORD}" | docker login -u "${DOCKER_USERNAME}" --password-stdin
+    - zcat images/release.amd64.tar.gz | docker load
+  script:
+    - docker push "mcronce/hass-event-collector:amd64"
+    - docker manifest create "mcronce/hass-event-collector:latest" --amend "mcronce/hass-event-collector:amd64"
+    - docker manifest push "mcronce/hass-event-collector:latest"
+    - |
+      if [ "${CI_COMMIT_TAG}" != '' ]; then
+        docker tag "mcronce/hass-event-collector:amd64" "mcronce/hass-event-collector:${CI_COMMIT_TAG}-amd64"
+        docker push "mcronce/hass-event-collector:${CI_COMMIT_TAG}-amd64"
+        docker manifest create "mcronce/hass-event-collector:${CI_COMMIT_TAG}" --amend "mcronce/hass-event-collector:${CI_COMMIT_TAG}-amd64"
+        docker manifest push "mcronce/hass-event-collector:${CI_COMMIT_TAG}"
+      fi
+  after_script:
+    - docker rmi -f "mcronce/hass-event-collector:amd64"
+    - docker manifest rm "mcronce/hass-event-collector:latest"
+    - |
+      if [ "${CI_COMMIT_TAG}" != '' ]; then
+        docker rmi -f "mcronce/hass-event-collector:${CI_COMMIT_TAG}-amd64"
+        docker manifest rm "mcronce/hass-event-collector:${CI_COMMIT_TAG}"
+      fi
+  only:
+    - tags
+
+Push chart:
+  stage: deploy
+  image: alpine/helm:latest
+  before_script:
+    - apk add -U git
+    - helm plugin install https://github.com/chartmuseum/helm-push.git
+  script:
+    - helm cm-push ./dist/helm https://charts.cronce.io
+  only:
+    - tags
+
+cargo cache cleanup:
+  stage: cleanup
+  image: mcronce/cargo-cache
+  variables:
+    RUSTC_WRAPPER: ""
+  cache:
+    - key: rust
+      paths:
+        - .cargo
+  before_script: []
+  script:
+    - CARGO_HOME=.cargo cargo cache clean-unref
+  after_script: []
+
