@@ -1,0 +1,52 @@
+FROM mcronce/rust-pgo:1.75 AS builder
+
+ARG \
+	RUSTC_WRAPPER \
+	SCCACHE_ENDPOINT \
+	SCCACHE_S3_USE_SSL=off \
+	SCCACHE_BUCKET \
+	AWS_ACCESS_KEY_ID \
+	AWS_SECRET_ACCESS_KEY
+
+WORKDIR /repo
+
+COPY Cargo.toml /repo/
+RUN \
+	mkdir -v /repo/src && \
+	echo 'fn main() {}' > /repo/src/main.rs && \
+	cargo build --release && \
+	bash -exc "if [ '${RUSTC_WRAPPER}' == '/usr/bin/sccache' ]; then /usr/bin/sccache -s; fi" && \
+	rm -Rvf /repo/src
+
+COPY src /repo/src
+
+RUN \
+	touch src/main.rs && \
+	cargo build --release && \
+	bash -exc "if [ '${RUSTC_WRAPPER}' == '/usr/bin/sccache' ]; then /usr/bin/sccache -s; fi"
+
+RUN strip /repo/target/release/hass-event-collector
+
+FROM gcr.io/distroless/cc-debian12
+COPY --from=builder /repo/target/release/hass-event-collector /usr/local/bin/hass-event-collector
+EXPOSE 80
+ENV \
+	PORT=80 \
+	RUST_LOG=info,actix-web=debug \
+	HASS_HOST= \
+	HASS_PORT=80 \
+	HASS_TOKEN= \
+	MQTT_HOST= \
+	MQTT_PORT=1883 \
+	MQTT_TOPIC= \
+	ENTITY_FILTER= \
+	WORKERS=1 \
+	INFLUXDB_HOST= \
+	INFLUXDB_PORT=8086 \
+	INFLUXDB_TLS=false \
+	INFLUXDB_USERNAME= \
+	INFLUXDB_PASSWORD= \
+	INFLUXDB_DATABASE=example
+
+ENTRYPOINT ["/usr/local/bin/hass-event-collector"]
+
