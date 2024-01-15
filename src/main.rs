@@ -105,13 +105,17 @@ impl Config {
 					};
 
 					let mut point = Timestamp::from(ts).into_query(format!("hass:{kind}"));
-					point = match (state.state.parse::<u64>(), state.state.parse::<f64>()) {
-						(Ok(v), _) => point.add_field("value", v),
-						(_, Ok(v)) => point.add_field("value", v),
-						(Err(_), Err(_)) => continue
+					let value = match (state.state.parse::<f64>(), state.state.parse::<u64>()) {
+						(Ok(v), _) => v,
+						(_, Ok(v)) => v as f64,
+						(Err(_), Err(_)) => {
+							warn!(entity_id=meta.entity.entity_id, value=state.state, "Failed to parse numerical value from state");
+							continue;
+						}
 					};
 
 					point = point
+						.add_field("value", value)
 						.add_tag("entity.id", meta.entity.entity_id.as_str())
 						.add_tag("entity.name", name.as_str())
 						.add_tag("device.name", meta.device.name.as_str());
