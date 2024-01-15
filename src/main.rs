@@ -19,6 +19,7 @@ use tracing::info;
 use tracing::warn;
 
 mod filter;
+use filter::DefaultFilter;
 use filter::EntityFilter;
 mod metadata;
 
@@ -36,7 +37,11 @@ struct Config {
 	mqtt_port: u16,
 	#[clap(env, long)]
 	mqtt_topic: String,
-	#[clap(long, env)]
+	#[clap(long, env, default_value_t = DefaultFilter::Allow)]
+	default_filter: DefaultFilter,
+	/// If the default is "allow", any entities that match the filter will be denied; if the
+	/// default is "deny", any entities that match the filter will be allowed.
+	#[clap(long, env, default_value = "[]")]
 	entity_filter: EntityFilter,
 	#[clap(short = 'j', long, env, default_value_t = 1)]
 	workers: u8,
@@ -60,6 +65,7 @@ impl Config {
 		let (tx, rx) = async_channel::bounded(self.workers as usize * 2);
 		let mut workers = Vec::with_capacity(self.workers as usize);
 		for i in 0..self.workers {
+			let default_filter = self.default_filter;
 			let filter = self.entity_filter.clone();
 			let influx = self.influxdb.client();
 			let rx: async_channel::Receiver<Bytes> = rx.clone();
@@ -74,7 +80,7 @@ impl Config {
 						}
 					};
 
-					if (!filter.matches_event(&ev)) {
+					if ((default_filter == DefaultFilter::Deny && !filter.matches_event(&ev)) || (default_filter == DefaultFilter::Allow && filter.matches_event(&ev))) {
 						debug!(entity_id = ev.event_data.entity_id, "Did not match filter");
 						continue;
 					}
