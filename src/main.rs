@@ -110,7 +110,6 @@ impl Config {
 						continue;
 					};
 
-					let mut point = Timestamp::from(ts).into_query(format!("hass:{kind}"));
 					let value = match (state.state.parse::<f64>(), state.state.parse::<u64>()) {
 						(Ok(v), _) => v,
 						(_, Ok(v)) => v as f64,
@@ -120,7 +119,8 @@ impl Config {
 						}
 					};
 
-					point = point
+					let mut point = Timestamp::from(ts)
+						.into_query(format!("hass:{kind}"))
 						.add_field("value", value)
 						.add_tag("entity.id", meta.entity.entity_id.as_str())
 						.add_tag("entity.name", name.as_str())
