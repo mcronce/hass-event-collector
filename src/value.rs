@@ -14,6 +14,10 @@ impl FromStr for Value {
 			return Ok(Self(v as f64));
 		}
 
+		if let Ok(v) = input.parse::<bool>() {
+			return Ok(Self(v as u8 as f64));
+		}
+
 		Err(ParseError)
 	}
 }
