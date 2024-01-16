@@ -22,6 +22,8 @@ mod filter;
 use filter::DefaultFilter;
 use filter::EntityFilter;
 mod metadata;
+mod value;
+use value::Value;
 
 #[derive(Debug, Parser)]
 struct Config {
@@ -110,18 +112,14 @@ impl Config {
 						continue;
 					};
 
-					let value = match (state.state.parse::<f64>(), state.state.parse::<u64>()) {
-						(Ok(v), _) => v,
-						(_, Ok(v)) => v as f64,
-						(Err(_), Err(_)) => {
-							warn!(entity_id=meta.entity.entity_id, value=state.state, "Failed to parse numerical value from state");
-							continue;
-						}
+					let Ok(value) = state.state.parse::<Value>() else {
+						warn!(entity_id=meta.entity.entity_id, value=state.state, "Failed to parse numerical value from state");
+						continue;
 					};
 
 					let mut point = Timestamp::from(ts)
 						.into_query(format!("hass:{kind}"))
-						.add_field("value", value)
+						.add_field("value", value.0)
 						.add_tag("entity.id", meta.entity.entity_id.as_str())
 						.add_tag("entity.name", name.as_str())
 						.add_tag("device.name", meta.device.name.as_str());
