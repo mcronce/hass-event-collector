@@ -21,6 +21,11 @@ impl FromStr for Value {
 		match input {
 			"off" => return Ok(Self(0.0)),
 			"on" => return Ok(Self(1.0)),
+
+			"idle" => return Ok(Self(0.0)),
+			"paused" => return Ok(Self(0.5)),
+			"playing" => return Ok(Self(1.0)),
+
 			_ => ()
 		};
 
