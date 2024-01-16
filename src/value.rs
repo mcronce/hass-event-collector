@@ -18,6 +18,12 @@ impl FromStr for Value {
 			return Ok(Self(v as u8 as f64));
 		}
 
+		match input {
+			"off" => return Ok(Self(0.0)),
+			"on" => return Ok(Self(1.0)),
+			_ => ()
+		};
+
 		Err(ParseError)
 	}
 }
