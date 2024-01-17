@@ -135,12 +135,12 @@ impl Config {
 					let query = match point.build() {
 						Ok(v) => v,
 						Err(e) => {
-							error!(error=?e, entity_id=meta.entity.entity_id, "Failed to build query");
+							error!(error=?e, entity_id=meta.entity.entity_id, "Failed to build datapoint");
 							continue;
 						}
 					};
 
-					info!(query = query.get(), "Built query");
+					info!(point=%query.get(), "Built datapoint");
 
 					if let Err(e) = influx.query(point).await {
 						error!(error=?e, entity_id=meta.entity.entity_id, "Failed to write data");
