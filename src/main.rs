@@ -107,11 +107,6 @@ impl Config {
 						continue;
 					};
 
-					let Some(name) = meta.entity.name.as_ref().or(meta.entity.original_name.as_ref()) else {
-						warn!(entity_id = meta.entity.entity_id, "No entity name found");
-						continue;
-					};
-
 					let Ok(value) = state.state.parse::<Value>() else {
 						warn!(entity_id=meta.entity.entity_id, value=state.state, "Failed to parse numerical value from state");
 						continue;
@@ -121,8 +116,11 @@ impl Config {
 						.into_query(format!("hass:{kind}"))
 						.add_field("value", value.0)
 						.add_tag("entity.id", meta.entity.entity_id.as_str())
-						.add_tag("entity.name", name.as_str())
 						.add_tag("device.name", meta.device.name.as_str());
+
+					if let Some(name) = meta.entity.name.as_ref().or(meta.entity.original_name.as_ref()) {
+						point = point.add_tag("entity.name", name.as_str());
+					}
 
 					if let Some(area) = meta.area.as_ref() {
 						point = point.add_tag("device.area", area.name.as_str());
