@@ -12,6 +12,7 @@ use influxdb::Query;
 use influxdb::Timestamp;
 use tokio::signal::unix::signal;
 use tokio::signal::unix::SignalKind;
+use tokio::sync::RwLock;
 use tokio::task;
 use tracing::debug;
 use tracing::error;
@@ -22,6 +23,7 @@ mod filter;
 use filter::DefaultFilter;
 use filter::EntityFilter;
 mod metadata;
+use metadata::MetadataTree;
 mod value;
 use value::Value;
 
@@ -63,7 +65,7 @@ impl Config {
 		Ok((client, stream))
 	}
 
-	fn spawn_workers(&self, metadata: Arc<metadata::MetadataTree>) -> (async_channel::Sender<Bytes>, Vec<task::JoinHandle<()>>) {
+	fn spawn_workers(&self, metadata: Arc<RwLock<MetadataTree>>) -> (async_channel::Sender<Bytes>, Vec<task::JoinHandle<()>>) {
 		let (tx, rx) = async_channel::bounded(self.workers as usize * 2);
 		let mut workers = Vec::with_capacity(self.workers as usize);
 		for i in 0..self.workers {
@@ -102,46 +104,49 @@ impl Config {
 						continue;
 					};
 
-					let Some(meta) = metadata.find(&state.entity_id) else {
-						warn!(entity_id = state.entity_id, "Metadata not found");
-						continue;
+					let point = {
+						let metadata = metadata.read().await;
+						let Some(meta) = metadata.find(&state.entity_id) else {
+							warn!(entity_id = state.entity_id, "Metadata not found");
+							continue;
+						};
+
+						let Ok(value) = state.state.parse::<Value>() else {
+							warn!(entity_id=meta.entity.entity_id, value=state.state, "Failed to parse numerical value from state");
+							continue;
+						};
+
+						let mut point = Timestamp::from(ts)
+							.into_query(format!("hass:{kind}"))
+							.add_field("value", value.0)
+							.add_tag("entity.id", meta.entity.entity_id.as_str())
+							.add_tag("device.name", meta.device.name.as_str());
+
+						if let Some(name) = meta.entity.name.as_ref().or(meta.entity.original_name.as_ref()) {
+							point = point.add_tag("entity.name", name.as_str());
+						}
+
+						if let Some(area) = meta.area.as_ref() {
+							point = point.add_tag("device.area", area.name.as_str());
+						}
+
+						if let Some(class) = state.attributes.get("device_class").and_then(|v| v.as_str()) {
+							point = point.add_tag("device.class", class);
+						}
+
+						point
 					};
 
-					let Ok(value) = state.state.parse::<Value>() else {
-						warn!(entity_id=meta.entity.entity_id, value=state.state, "Failed to parse numerical value from state");
-						continue;
-					};
-
-					let mut point = Timestamp::from(ts)
-						.into_query(format!("hass:{kind}"))
-						.add_field("value", value.0)
-						.add_tag("entity.id", meta.entity.entity_id.as_str())
-						.add_tag("device.name", meta.device.name.as_str());
-
-					if let Some(name) = meta.entity.name.as_ref().or(meta.entity.original_name.as_ref()) {
-						point = point.add_tag("entity.name", name.as_str());
-					}
-
-					if let Some(area) = meta.area.as_ref() {
-						point = point.add_tag("device.area", area.name.as_str());
-					}
-
-					if let Some(class) = state.attributes.get("device_class").and_then(|v| v.as_str()) {
-						point = point.add_tag("device.class", class);
-					}
-
-					let query = match point.build() {
-						Ok(v) => v,
+					match point.build() {
+						Ok(v) => info!(point=%v.get(), "Built datapoint"),
 						Err(e) => {
-							error!(error=?e, entity_id=meta.entity.entity_id, "Failed to build datapoint");
+							error!(error=?e, entity_id=state.entity_id, "Failed to build datapoint");
 							continue;
 						}
-					};
-
-					info!(point=%query.get(), "Built datapoint");
+					}
 
 					if let Err(e) = influx.query(point).await {
-						error!(error=?e, entity_id=meta.entity.entity_id, "Failed to write data");
+						error!(error=?e, state.entity_id, "Failed to write data");
 					}
 				}
 
@@ -161,11 +166,30 @@ async fn main() {
 	let mut client = client::connect(&config.hass_host, config.hass_port).await.unwrap();
 	client.auth_with_longlivedtoken(std::mem::take(&mut config.hass_token)).await.unwrap();
 
-	let areas = client.get_area_registry().await.unwrap();
-	let devices = client.get_device_registry().await.unwrap();
-	let entities = client.get_entity_registry().await.unwrap();
-	// TODO:  Filter these somehow
-	let meta = metadata::MetadataTree::new(areas, devices, entities);
+	let meta = Arc::new(RwLock::new(MetadataTree::load(&mut client).await.unwrap()));
+	let meta_handle = {
+		let meta = meta.clone();
+		task::spawn(async move {
+			let mut tick = tokio::time::interval(Duration::from_secs(10));
+			let mut fail_count = 0;
+			loop {
+				if(fail_count > 4) {
+					break;
+				}
+				tick.tick().await;
+				let new_meta = match MetadataTree::load(&mut client).await {
+					Ok(v) => v,
+					Err(e) => {
+						error!(error=?e, fail_count, "Failed to get metadata");
+						fail_count += 1;
+						continue;
+					}
+				};
+				*meta.write().await = new_meta;
+			}
+			error!("Metadata failure count limit reached");
+		})
+	};
 
 	let (tx, workers) = config.spawn_workers(meta);
 
@@ -206,7 +230,8 @@ async fn main() {
 		_ = sigterm.recv() => info!("SIGTERM received; shutting down"),
 		_ = sigint.recv() => info!("SIGINT received; shutting down"),
 		_ = sigquit.recv() => info!("SIGQUIT received; suhtting down"),
-		_ = mqtt_handler => warn!("MQTT event loop handler terminated; shutting down")
+		_ = mqtt_handler => warn!("MQTT event loop handler terminated; shutting down"),
+		_ = meta_handle => warn!("Metadata loop terminated; shutting down")
 	};
 
 	if let Err(e) = client.unsubscribe(&config.mqtt_topic).await {
