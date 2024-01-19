@@ -10,9 +10,9 @@ use hass_rs::MqttEvent;
 use influxdb::InfluxDbWriteable;
 use influxdb::Query;
 use influxdb::Timestamp;
+use parking_lot::RwLock;
 use tokio::signal::unix::signal;
 use tokio::signal::unix::SignalKind;
-use tokio::sync::RwLock;
 use tokio::task;
 use tracing::debug;
 use tracing::error;
@@ -105,7 +105,7 @@ impl Config {
 					};
 
 					let point = {
-						let metadata = metadata.read().await;
+						let metadata = metadata.read();
 						let Some(meta) = metadata.find(&state.entity_id) else {
 							warn!(entity_id = state.entity_id, "Metadata not found");
 							continue;
@@ -185,7 +185,7 @@ async fn main() {
 						continue;
 					}
 				};
-				*meta.write().await = new_meta;
+				*meta.write() = new_meta;
 			}
 			error!("Metadata failure count limit reached");
 		})
