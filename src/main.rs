@@ -195,31 +195,51 @@ async fn main() {
 
 	let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
 
-	let (client, mut mqtt_stream) = config.mqtt().await.unwrap();
 	let mqtt_handler = task::spawn(async move {
-		loop {
-			tokio::select! {
-				_ = &mut shutdown_rx => break,
-				ev = mqtt_stream.poll() => {
-					let ev = match ev {
-						Ok(v) => v,
-						Err(e) => {
-							error!(error=?e, "Error receiving from MQTT event loop");
-							continue;
+		let (mut client, mut mqtt_stream) = match config.mqtt().await {
+			Ok(v) => v,
+			Err(error) => {
+				warn!(%error, "Client failed to connect; exiting.");
+				return;
+			}
+		};
+		'retry: loop {
+			'inner: loop {
+				tokio::select! {
+					_ = &mut shutdown_rx => break 'retry,
+					ev = mqtt_stream.poll() => {
+						let ev = match ev {
+							Ok(v) => v,
+							Err(e) => {
+								error!(error=?e, "Error receiving from MQTT event loop");
+								break 'inner;
+							}
+						};
+						let rumqttc::Event::Incoming(ev) = ev else {
+							continue 'inner;
+						};
+						let rumqttc::Packet::Publish(ev) = ev else {
+							continue 'inner;
+						};
+						if let Err(e) = tx.send(ev.payload).await {
+							error!(error=?e, "Send channel has closed; terminating");
+							break 'retry;
 						}
-					};
-					let rumqttc::Event::Incoming(ev) = ev else {
-						continue;
-					};
-					let rumqttc::Packet::Publish(ev) = ev else {
-						continue;
-					};
-					if let Err(e) = tx.send(ev.payload).await {
-						error!(error=?e, "Send channel has closed; terminating");
-						break;
 					}
 				}
 			}
+			warn!("Client shut down; waiting a few seconds then reconnecting.");
+			tokio::time::sleep(Duration::from_secs(3)).await;
+			if let Ok((c, s)) = config.mqtt().await {
+				client = c;
+				mqtt_stream = s;
+			} else {
+				warn!("Client failed to connect; waiting a second then retrying.");
+				tokio::time::sleep(Duration::from_secs(1)).await;
+			}
+		}
+		if let Err(e) = client.unsubscribe(&config.mqtt_topic).await {
+			error!(error=?e, "Failed to unsubscribe from MQTT topic");
 		}
 	});
 
@@ -234,9 +254,6 @@ async fn main() {
 		_ = meta_handle => warn!("Metadata loop terminated; shutting down")
 	};
 
-	if let Err(e) = client.unsubscribe(&config.mqtt_topic).await {
-		error!(error=?e, "Failed to unsubscribe from MQTT topic");
-	}
 	shutdown_tx.send(()).unwrap();
 	futures::future::join_all(workers).await;
 }
