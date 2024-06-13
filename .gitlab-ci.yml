@@ -20,7 +20,7 @@ variables:
 
 cargo build and cargo test:
   stage: build
-  image: mcronce/rust-pgo:1.77
+  image: mcronce/rust-pgo:1.78
   cache:
     - key: rust
       paths:
