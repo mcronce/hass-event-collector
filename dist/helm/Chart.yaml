@@ -1,8 +1,8 @@
 apiVersion: v1
 name: hass-event-collector
 description: hass-event-collector listens for Home Assistant events on an MQTT bus, hydrates the data points with Entity, Device, and Area metadata from Home Assistant's REST API, and pushes them to an influxdb instance
-version: 0.1.1
-appVersion: 0.1.1
+version: 0.2.0
+appVersion: 0.2.0
 maintainers:
   - name: Mike Cronce
     email: mike@cronce.io
