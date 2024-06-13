@@ -17,8 +17,10 @@ collector:
     host:
     port: 8123
     entity_filter:
-      kind: sensor
-      name: "^lumi_"
+      # If default is "allow", any entities matching an entry will be denied.  If default is
+      # "deny", any entities matching an entry will be allowed.
+      default: allow
+      entries: []
   mqtt:
     host:
     port: 1883

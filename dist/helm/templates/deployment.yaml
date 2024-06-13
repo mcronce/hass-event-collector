@@ -48,8 +48,10 @@ spec:
               value: {{ .Values.collector.mqtt.port | quote }}
             - name: MQTT_TOPIC
               value: {{ required "collector.mqtt.topic is required" .Values.collector.mqtt.topic | quote }}
+            - name: DEFAULT_FILTER
+              value: {{ required "collector.hass.entity_filter.default is required" .Values.collector.hass.entity_filter.default | quote }}
             - name: ENTITY_FILTER
-              value: {{ required ".Values.collector.hass.entity_filter is required" .Values.collector.hass.entity_filter | toJson | quote }}
+              value: {{ required "collector.hass.entity_filter.entries is required" .Values.collector.hass.entity_filter.entries | toJson | quote }}
             - name: WORKERS
               value: {{ $workers | quote }}
             - name: INFLUXDB_HOST
