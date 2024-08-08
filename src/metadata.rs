@@ -5,6 +5,7 @@ use hass_rs::HassClient;
 use hass_rs::HassDevice;
 use hass_rs::HassEntity;
 use hass_rs::HassError;
+use tracing::instrument;
 
 pub struct MetadataTree {
 	entities_by_id: HashMap<String, HassEntity>,
@@ -28,6 +29,7 @@ impl MetadataTree {
 		}
 	}
 
+	#[instrument(level = "debug", skip_all, err)]
 	pub async fn load(client: &mut HassClient) -> Result<Self, HassError> {
 		let areas = client.get_area_registry().await?;
 		let devices = client.get_device_registry().await?;
